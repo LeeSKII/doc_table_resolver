@@ -2,6 +2,7 @@ from math import e
 from tkinter import NO
 from typing import List
 from docx import Document
+from matplotlib.pylab import f
 from ollama import Client
 from pymongo import MongoClient
 import xml.etree.ElementTree as ET
@@ -63,10 +64,11 @@ key_mapping = {
     '设备名称': 'device_name',
     '规格/材质': 'specification_material',
     '数量': 'quantity',
+    '单位': 'unit',
     '生产厂家': 'manufacturer',
     '单价': 'unit_price',
     '总价': 'total_price',
-    '价格单位': 'unit',
+    '价格单位': 'price_unit',
     'other_column': 'additional_info',
 }
 
@@ -155,6 +157,55 @@ def extract_xml_to_dict(text):
     except ET.ParseError:
         return None, None  # 如果XML格式错误，返回None, None
 
+
+def transform_dict(dic):
+    # 键的映射关系
+    key_mapping = {
+        '项目名称': 'project_name',
+        '合同编号': 'contract_number',
+        '合同类型': 'contract_type',
+        '子项名称': 'subitem_name'
+    }
+    translated_dict = {key_mapping[old_key]: value for old_key, value in dic.items()}
+    return translated_dict
+
+def parse_doc_meta_xml_to_dict(text):
+    # 使用正则表达式提取最后一个<fields>...</fields>部分
+    pattern = r'<fields.*?>.*?</fields>'
+    matches = re.findall(pattern, text, re.DOTALL)
+    
+    if not matches:
+        return {"error": "No XML structure found in the text"}
+    
+    xml_string = matches[-1]  # 取匹配列表中的最后一个元素
+    
+    # 创建 XML 解析器
+    try:
+        # 将字符串转换为文件对象并解析
+        root = ET.fromstring(xml_string)
+        
+        # 定义只接受的字段
+        allowed_fields = {
+            '项目名称': None,
+            '合同编号': None,
+            '合同类型': None,
+            '子项名称': None
+        }
+        
+        # 遍历所有 field 元素
+        for field in root.findall('field'):
+            attributes = field.attrib
+            if len(attributes) == 1:
+                key = list(attributes.keys())[0]
+                # 只处理指定的四个字段
+                if key in allowed_fields:
+                    allowed_fields[key] = attributes[key]
+                
+        return allowed_fields
+    
+    except ET.ParseError as e:
+        return {"error": f"XML parsing error: {str(e)}"}
+
 def parse_table_to_objects(table, mapping_list:List, start_row=0):
     """
     根据映射列表从 python-docx 的 Table 对象中解析数据并转换为对象列表。
@@ -218,6 +269,48 @@ def parse_table_to_objects(table, mapping_list:List, start_row=0):
     
     return result
 
+# 解析文档元数据
+def resolve_doc_info(file_path):
+    doc = Document(file_path)
+    range = 100
+    index = 0
+    paragraphs = []
+    for paragraph in doc.paragraphs:
+        if index > range:
+            break
+        index += 1
+        if len(paragraph.text.strip()) > 0:
+            paragraphs.append(paragraph.text)
+    context = '\n'.join(paragraphs)
+    system_prompt='''
+        你需要从用户提供的文本中提取出与合同相关的内容，需要提取的字段有：[项目名称, 合同编号, 合同类型, 子项名称]。
+        合同编号如果找到多个编号，优先买方合同编号。
+        将结果输出为如下xml结构：
+        <fields>
+            <field 项目名称="名称" />
+            <field 合同编号="例如：BGDSYR-2020-12" />
+            <field 合同类型="例如：订货|供货|施工|等 合同" />
+            <field 子项名称="例如：配件|设备|服务 等" />
+        </fields>
+        注意不要虚构内容，仅根据用户提供的内容进行数据提取，如果没有找到相关的合同信息，对应的属性值可以为空。
+    '''
+    client = Client(
+    host='http://192.168.43.41:11434',
+    headers={'x-some-header': 'some-value'}
+    )
+    response = client.chat(model='qwq:latest', 
+                        options={
+                            'temperature':0,
+                            "num_ctx": 8192,
+                        },
+                        messages=[
+        {'role':'system', 'content': system_prompt},
+        {
+            'role': 'user',
+            'content': f"{context}"+"<think>\n",
+        },
+    ])
+    return response.message.content
 
 # 函数：根据映射表转换字典键
 def transform_keys(data, mapping):
@@ -247,6 +340,12 @@ def save_to_mongodb(transformed_data):
 def parse_docx_tables(file_path):
     # 打开 .docx 文件
     doc = Document(file_path)
+    # 解析文档元数据
+    doc_meta_text = resolve_doc_info(file_path)
+    doc_meta_dic = parse_doc_meta_xml_to_dict(doc_meta_text)
+    doc_meta_dic = transform_dict(doc_meta_dic)
+    doc_meta_dic['file_path'] = file_path
+    print(f"文档元数据\n{doc_meta_dic}")
     # 遍历文档中的所有表格
     for table in doc.tables:
         print("找到一个表格：\n")
@@ -273,20 +372,21 @@ def parse_docx_tables(file_path):
         else:
             is_xml_valid = False
         if is_xml_valid:
-            #print(f"表格内容：\n{table_context}")
+            # print(f"表格内容：\n{table_context}")
             # print(f"XML结构：\n{xml_result}")
             table_objects = parse_table_to_objects(table, xml_result, start_row)
             # print(f"对象列表：\n{table_objects}")
             for obj in table_objects:
-                db_data = transform_keys(obj, key_mapping)
-                print(f"转换后的对象列表：\n{db_data}")
+                db_data_dic = transform_keys(obj, key_mapping)
+                # 合并文档元数据
+                merge_dic = db_data_dic | doc_meta_dic
                 try:                
-                    save_to_mongodb(db_data)
+                    save_to_mongodb(merge_dic)
                 except Exception as e:
                     print(f"存储到MongoDB失败: {str(e)}")            
         elif xml_result is not None and is_xml_valid is False:
             print(xml_result)
-            # TODO: 需要进入重试机制，重新分析表格内容
+            # 需要进入重试机制，重新分析表格内容
             print("LLM解析非有效XML结构，重新分析！")
             # LLM重新数据分析
             llm_result = chat_with_llm(table_context)
@@ -299,10 +399,11 @@ def parse_docx_tables(file_path):
             if is_xml_valid:
                 table_objects = parse_table_to_objects(table, xml_result, start_row)
                 for obj in table_objects:
-                    db_data = transform_keys(obj, key_mapping)
-                    print(f"转换后的对象列表：\n{db_data}")
+                    db_data_dic = transform_keys(obj, key_mapping)
+                    # 合并文档元数据
+                    merge_dic = db_data_dic | doc_meta_dic
                     try:                
-                        save_to_mongodb(db_data)
+                        save_to_mongodb(merge_dic)
                     except Exception as e:
                         print(f"存储到MongoDB失败: {str(e)}")     
         else:
@@ -317,4 +418,5 @@ def parse_docx_tables(file_path):
         print("-" * 50)  # 分隔不同表格
 
 
-parse_docx_tables(file_path)
+if __name__ == '__main__':
+    parse_docx_tables(file_path)
