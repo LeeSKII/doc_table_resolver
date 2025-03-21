@@ -6,11 +6,14 @@ import xml.etree.ElementTree as ET
 import re
 import time
 
+file_path ="C:\\Lee\\files\\采购\\others\\04 管道增压泵采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\05 起重设备采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\12低压柜及三箱合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
 file_path= "C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\04 渣浆泵备件采购合同.docx"
 file_path = "C:\\Lee\\files\\03 循环风机采购合同.docx"
 file_path= "C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
-file_path ="C:\\Lee\\files\\采购\\others\\12低压柜及三箱合同.docx"
-file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\14自动汽水取样装置采购合同.docx"
 
 
 system_prompt = '''
