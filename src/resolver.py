@@ -1,18 +1,17 @@
-from math import e
-from tkinter import NO
 from typing import List
 from docx import Document
-from matplotlib.pylab import f
 from ollama import Client
 from pymongo import MongoClient
 import xml.etree.ElementTree as ET
 import re
+import time
 
 file_path= "C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\04 渣浆泵备件采购合同.docx"
 file_path = "C:\\Lee\\files\\03 循环风机采购合同.docx"
 file_path= "C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
-file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\12低压柜及三箱合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
+
 
 system_prompt = '''
 你是一位表格数据的识别判断专家，可以帮助分析提供的表格是否为设备\产品表格，用户提供表格内容位于<table></table>标签中，识别要求如下：
@@ -301,7 +300,7 @@ def resolve_doc_info(file_path):
     response = client.chat(model='qwq:latest', 
                         options={
                             'temperature':0,
-                            "num_ctx": 8192,
+                            "num_ctx": 1024*32,
                         },
                         messages=[
         {'role':'system', 'content': system_prompt},
@@ -346,11 +345,12 @@ def parse_docx_tables(file_path):
     doc_meta_dic = transform_dict(doc_meta_dic)
     doc_meta_dic['file_path'] = file_path
     print(f"文档元数据\n{doc_meta_dic}")
+    table_index = 0
     # 遍历文档中的所有表格
     for table in doc.tables:
         print("找到一个表格：\n")
         table_context_list = []
-        index = 0
+        row_index = 0
         # 遍历表格的每一行
         for row in table.rows:
             row_data = []
@@ -359,8 +359,9 @@ def parse_docx_tables(file_path):
                 row_data.append(cell.text.strip())  # 获取单元格文本并去除多余空格
             # print(row_data)  # 打印该行内容
             table_context_list.append(row_data)  # 将该行内容添加到表格内容列表中
-            index += 1
-            if index > 5:
+            row_index += 1
+            # 限制表格解析行数，防止上下文溢出
+            if row_index > 5:
                 break
         table_context = '\n'.join('\t'.join(row) for row in table_context_list)
         table_objects = None
@@ -374,12 +375,13 @@ def parse_docx_tables(file_path):
         if is_xml_valid:
             # print(f"表格内容：\n{table_context}")
             # print(f"XML结构：\n{xml_result}")
+            table_index += 1
             table_objects = parse_table_to_objects(table, xml_result, start_row)
             # print(f"对象列表：\n{table_objects}")
             for obj in table_objects:
                 db_data_dic = transform_keys(obj, key_mapping)
                 # 合并文档元数据
-                merge_dic = db_data_dic | doc_meta_dic
+                merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
                 try:                
                     save_to_mongodb(merge_dic)
                 except Exception as e:
@@ -397,11 +399,12 @@ def parse_docx_tables(file_path):
                 is_xml_valid = False
                 print("LLM重新解析失败！")
             if is_xml_valid:
+                table_index += 1
                 table_objects = parse_table_to_objects(table, xml_result, start_row)
                 for obj in table_objects:
                     db_data_dic = transform_keys(obj, key_mapping)
                     # 合并文档元数据
-                    merge_dic = db_data_dic | doc_meta_dic
+                    merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
                     try:                
                         save_to_mongodb(merge_dic)
                     except Exception as e:
@@ -419,4 +422,7 @@ def parse_docx_tables(file_path):
 
 
 if __name__ == '__main__':
+    start = time.time()
     parse_docx_tables(file_path)
+    end = time.time()
+    print(f"解析完成，耗时：{end-start}秒")
