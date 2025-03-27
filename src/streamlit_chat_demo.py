@@ -1,4 +1,3 @@
-from math import fabs
 import streamlit as st
 from pymongo import MongoClient
 import pandas as pd
@@ -56,27 +55,29 @@ system_prompt = '''
 </requirements>
 '''
 
+mongo_uri = "mongodb://localhost:27017/"
+
 # 侧边栏配置
-with st.sidebar:
-    st.header("⚙️ 配置面板")
+# with st.sidebar:
+#     st.header("⚙️ 配置面板")
     
-    # MongoDB配置
-    st.subheader("MongoDB 设置")
-    mongo_uri = st.text_input(
-        "连接字符串",
-        "mongodb://localhost:27017/",
-        help="格式：mongodb://用户名:密码@地址:端口/"
-    )
-    db_name = st.text_input("数据库名称", "equipment_db")
-    collection_name = st.text_input("集合名称", "equipment_collection")
+#     # MongoDB配置
+#     st.subheader("MongoDB 设置")
+#     mongo_uri = st.text_input(
+#         "连接字符串",
+#         "mongodb://localhost:27017/",
+#         help="格式：mongodb://用户名:密码@地址:端口/"
+#     )
+#     db_name = st.text_input("数据库名称", "equipment_db")
+#     collection_name = st.text_input("集合名称", "equipment_collection")
     
-    # 系统提示词编辑器
-    st.subheader("系统提示词")
-    system_prompt = st.text_area(
-        "定制系统指令",
-        height=200,
-        value=system_prompt
-    )
+#     # 系统提示词编辑器
+#     st.subheader("系统提示词")
+#     system_prompt = st.text_area(
+#         "定制系统指令",
+#         height=200,
+#         value=system_prompt
+#     )
     
 
 

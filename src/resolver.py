@@ -1,22 +1,24 @@
 from typing import List
 from docx import Document
 from ollama import Client
+import ollama
 from pymongo import MongoClient
 import xml.etree.ElementTree as ET
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 file_path ="C:\\Lee\\files\\采购\\others\\04 管道增压泵采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\05 起重设备采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\12低压柜及三箱合同.docx"
-file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
-file_path= "C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\04 渣浆泵备件采购合同.docx"
-file_path = "C:\\Lee\\files\\03 循环风机采购合同.docx"
-file_path= "C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\04 渣浆泵备件采购合同.docx"
+file_path ="C:\\Lee\\files\\03 循环风机采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\14自动汽水取样装置采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
 
 
-system_prompt = '''
+table_header_search_system_prompt = '''
 你是一位表格数据的识别判断专家，可以帮助分析提供的表格是否为设备\产品表格，用户提供表格内容位于<table></table>标签中，识别要求如下：
    1、首先判断是否为设备\产品表格：
       设备的表头一般出现在表格的前三行以内；
@@ -76,9 +78,14 @@ key_mapping = {
 
 
 model_name = 'deepseek-r1:32b'
-model_name = 'qwq:latest'
 
-def chat_with_llm(user_content):
+
+config = {
+    'model_name': 'qwq:latest',
+    'ollama_host':'http://192.168.43.41:11434',
+}
+
+def search_table_header_with_llm(table_content:str):
     client = Client(
         host='http://192.168.43.41:11434',
         headers={'x-some-header': 'some-value'}
@@ -91,7 +98,7 @@ def chat_with_llm(user_content):
                         messages=[
     {
         'role': 'user',
-        'content': f"{system_prompt}<table>{user_content}</table>"+"<think>\n",
+        'content': f"{table_header_search_system_prompt}<table>{table_content}</table>"+"<think>\n",
     },
     ])
     # print(response.message.content)
@@ -339,19 +346,26 @@ def save_to_mongodb(transformed_data):
     except Exception as e:
         print(f"发生错误: {str(e)}")
 
-def parse_docx_tables(file_path):
-    # 打开 .docx 文件
+def resolve_doc_meta_info_with_llm(file_path:str):
+     # 打开 .docx 文件
     doc = Document(file_path)
     # 解析文档元数据
     doc_meta_text = resolve_doc_info(file_path)
     doc_meta_dic = parse_doc_meta_xml_to_dict(doc_meta_text)
     doc_meta_dic = transform_dict(doc_meta_dic)
     doc_meta_dic['file_path'] = file_path
-    print(f"文档元数据\n{doc_meta_dic}")
+    return doc_meta_dic
+
+def retrieve_table_from_docx(file_path:str):
+    doc = Document(file_path)
+    doc_meta_dic = resolve_doc_meta_info_with_llm(file_path)
+    
     table_index = 0
-    # 遍历文档中的所有表格
+    table_dic_list = []
+     # 遍历文档中的所有表格
     for table in doc.tables:
         print("找到一个表格：\n")
+        table_index += 1
         table_context_list = []
         row_index = 0
         # 遍历表格的每一行
@@ -367,20 +381,49 @@ def parse_docx_tables(file_path):
             if row_index > 5:
                 break
         table_context = '\n'.join('\t'.join(row) for row in table_context_list)
-        table_objects = None
-        # LLM继续数据分析
-        llm_result = chat_with_llm(table_context)
+        # 返回对象结构
+        table_dic = {'table_index':table_index, 'table':table,'table_context':table_context,'doc_meta_dic':doc_meta_dic}
+        table_dic_list.append(table_dic)
+    
+    return table_dic_list
+
+
+def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
+    llm_result = search_table_header_with_llm(table_context)
+    xml_result,start_row = extract_xml_to_dict(llm_result)
+    if xml_result is not None:
+        is_xml_valid = is_valid_data(xml_result)
+    else:
+        is_xml_valid = False
+    if is_xml_valid:
+        # print(f"表格内容：\n{table_context}")
+        # print(f"XML结构：\n{xml_result}")
+
+        table_objects = parse_table_to_objects(table, xml_result, start_row)
+        # print(f"对象列表：\n{table_objects}")
+        for obj in table_objects:
+            db_data_dic = transform_keys(obj, key_mapping)
+            # 合并文档元数据
+            merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
+            try:                
+                save_to_mongodb(merge_dic)
+            except Exception as e:
+                print(f"存储到MongoDB失败: {str(e)}")            
+    elif xml_result is not None and is_xml_valid is False:
+        print(xml_result)
+        # 需要进入重试机制，重新分析表格内容
+        print("LLM解析非有效XML结构，重新分析！")
+        # LLM重新数据分析
+        llm_result = search_table_header_with_llm(table_context)
         xml_result,start_row = extract_xml_to_dict(llm_result)
         if xml_result is not None:
             is_xml_valid = is_valid_data(xml_result)
         else:
             is_xml_valid = False
+            print("LLM重新解析失败！")
         if is_xml_valid:
-            # print(f"表格内容：\n{table_context}")
-            # print(f"XML结构：\n{xml_result}")
-            table_index += 1
+
             table_objects = parse_table_to_objects(table, xml_result, start_row)
-            # print(f"对象列表：\n{table_objects}")
             for obj in table_objects:
                 db_data_dic = transform_keys(obj, key_mapping)
                 # 合并文档元数据
@@ -388,40 +431,102 @@ def parse_docx_tables(file_path):
                 try:                
                     save_to_mongodb(merge_dic)
                 except Exception as e:
-                    print(f"存储到MongoDB失败: {str(e)}")            
-        elif xml_result is not None and is_xml_valid is False:
-            print(xml_result)
-            # 需要进入重试机制，重新分析表格内容
-            print("LLM解析非有效XML结构，重新分析！")
-            # LLM重新数据分析
-            llm_result = chat_with_llm(table_context)
-            xml_result,start_row = extract_xml_to_dict(llm_result)
-            if xml_result is not None:
-                is_xml_valid = is_valid_data(xml_result)
-            else:
-                is_xml_valid = False
-                print("LLM重新解析失败！")
-            if is_xml_valid:
-                table_index += 1
-                table_objects = parse_table_to_objects(table, xml_result, start_row)
-                for obj in table_objects:
-                    db_data_dic = transform_keys(obj, key_mapping)
-                    # 合并文档元数据
-                    merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
-                    try:                
-                        save_to_mongodb(merge_dic)
-                    except Exception as e:
-                        print(f"存储到MongoDB失败: {str(e)}")     
-        else:
-            print(f"表格内容：\n{table_context}")
-            print(f"llm_result:\n{llm_result}")
-            print("无XML结构!")
+                    print(f"存储到MongoDB失败: {str(e)}")     
+    else:
+        print(f"表格内容：\n{table_context}")
+        print(f"llm_result:\n{llm_result}")
+        print("无XML结构!")
+
+
+def parallel(arg_list,func,worker_num=4):
+    '''并行处理任务'''
+    with ThreadPoolExecutor(max_workers=worker_num) as executor:
+        """Process multiple inputs concurrently with the same prompt."""
+        futures = [executor.submit(func,**item) for item in arg_list]
+        return [f.result() for f in futures]
+
+
+def parse_docx_tables(file_path):
+    
+    table_dic_list = retrieve_table_from_docx(file_path)
+    parallel(table_dic_list,retrieve_table_info_with_llm)
+    
+    # 打开 .docx 文件
+    # doc = Document(file_path)
+    # # 解析文档元数据
+    # doc_meta_dic = resolve_doc_meta_info_with_llm(file_path)
+    # print(f"文档元数据\n{doc_meta_dic}")
+    
+    # 遍历文档中的所有表格
+    # table_index = 0
+    # for table in doc.tables:
+    #     print("找到一个表格：\n")
+    #     table_context_list = []
+    #     row_index = 0
+    #     # 遍历表格的每一行
+    #     for row in table.rows:
+    #         row_data = []
+    #         # 遍历每一行的每个单元格
+    #         for cell in row.cells:
+    #             row_data.append(cell.text.strip())  # 获取单元格文本并去除多余空格
+    #         # print(row_data)  # 打印该行内容
+    #         table_context_list.append(row_data)  # 将该行内容添加到表格内容列表中
+    #         row_index += 1
+    #         # 限制表格解析行数，防止上下文溢出
+    #         if row_index > 5:
+    #             break
+    #     table_context = '\n'.join('\t'.join(row) for row in table_context_list)
+    #     table_objects = None
+    #     # LLM继续数据分析
+    #     llm_result = search_table_header_with_llm(table_context)
+    #     xml_result,start_row = extract_xml_to_dict(llm_result)
+    #     if xml_result is not None:
+    #         is_xml_valid = is_valid_data(xml_result)
+    #     else:
+    #         is_xml_valid = False
+    #     if is_xml_valid:
+    #         # print(f"表格内容：\n{table_context}")
+    #         # print(f"XML结构：\n{xml_result}")
+    #         table_index += 1
+    #         table_objects = parse_table_to_objects(table, xml_result, start_row)
+    #         # print(f"对象列表：\n{table_objects}")
+    #         for obj in table_objects:
+    #             db_data_dic = transform_keys(obj, key_mapping)
+    #             # 合并文档元数据
+    #             merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
+    #             try:                
+    #                 save_to_mongodb(merge_dic)
+    #             except Exception as e:
+    #                 print(f"存储到MongoDB失败: {str(e)}")            
+    #     elif xml_result is not None and is_xml_valid is False:
+    #         print(xml_result)
+    #         # 需要进入重试机制，重新分析表格内容
+    #         print("LLM解析非有效XML结构，重新分析！")
+    #         # LLM重新数据分析
+    #         llm_result = search_table_header_with_llm(table_context)
+    #         xml_result,start_row = extract_xml_to_dict(llm_result)
+    #         if xml_result is not None:
+    #             is_xml_valid = is_valid_data(xml_result)
+    #         else:
+    #             is_xml_valid = False
+    #             print("LLM重新解析失败！")
+    #         if is_xml_valid:
+    #             table_index += 1
+    #             table_objects = parse_table_to_objects(table, xml_result, start_row)
+    #             for obj in table_objects:
+    #                 db_data_dic = transform_keys(obj, key_mapping)
+    #                 # 合并文档元数据
+    #                 merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
+    #                 try:                
+    #                     save_to_mongodb(merge_dic)
+    #                 except Exception as e:
+    #                     print(f"存储到MongoDB失败: {str(e)}")     
+    #     else:
+    #         print(f"表格内容：\n{table_context}")
+    #         print(f"llm_result:\n{llm_result}")
+    #         print("无XML结构!")
         
-        # 存储表格
-        if is_xml_valid and table_objects is not None:
-            pass
-        
-        print("-" * 50)  # 分隔不同表格
+    # print("-" * 50)  # 分隔不同表格
 
 
 if __name__ == '__main__':
