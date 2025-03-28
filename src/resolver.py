@@ -21,13 +21,14 @@ deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
 deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
 
 file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
-file_path ="C:\\Lee\\files\\采购\\others\\14自动汽水取样装置采购合同.docx"
+
 file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\05 起重设备采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\12低压柜及三箱合同.docx"
 file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\04 渣浆泵备件采购合同.docx"
 file_path ="C:\\Lee\\files\\03 循环风机采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\04 管道增压泵采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\14自动汽水取样装置采购合同.docx"
 
 
 table_header_search_system_prompt = '''
@@ -45,6 +46,7 @@ table_header_search_system_prompt = '''
         需要注意如果在分析价格字段的时候，将价格单位进行识别，常规是**元**或者**万元**（如果不属于二者其一，使用表格提供的原始单位数据），价格单位通常出现在价格字段之后，位于（）括号符号内；
       1.2.2、分别整理每个字段；
       1.2.3、最后检查索引和对应原始表格字段和标准化后字段的名称映射正确。
+        表头在表格的第几行，用start_row属性表示，注意start_row从0开始计数，0表示第一行，1表示第二行，以此类推。
         注意索引都是从0开始计数。
     1.3、 按照要求生成XML结构：
       1.3.1、检查是否所有标准字段都被覆盖：
@@ -56,7 +58,7 @@ table_header_search_system_prompt = '''
         单价：有|无
         总价：有|无       
         
-        最后生成如下格式的XML(start_row属性表示表头行索引，index属性表示原始表格字段索引，根据实际表头所在的行索引进行填写)，其中unit属性只有标准字段单价和总价才有：
+        最后生成如下格式的XML(start_row属性表示表头行索引，index属性表示原始表格字段索引，根据实际表头所在的start_row进行填写)，其中unit属性只有标准字段单价和总价才有：
         <fields start_row="0">
             <field original="名称" standard="设备名称" index="0"/>
             <field original="规格/材质" standard="规格/材质" index="1"/>
@@ -404,9 +406,14 @@ def retrieve_table_from_docx(file_path:str):
             table_context_list.append(row_data)  # 将该行内容添加到表格内容列表中
             row_index += 1
             # 限制表格解析行数，防止上下文溢出
-            if row_index > 5:
+            if row_index > 6:
                 break
-        table_context = '\n'.join('\t'.join(row) for row in table_context_list)
+        temp_list = []
+        for row_data in table_context_list:
+            row_text = ','.join(row_data)
+            row_text = f'[{row_text}]'
+            temp_list.append(row_text)
+        table_context = '\n'.join(temp_list)
         # 返回对象结构
         table_dic = {'table_index':table_index, 'table':table,'table_context':table_context,'doc_meta_dic':doc_meta_dic}
         table_dic_list.append(table_dic)
@@ -437,8 +444,10 @@ def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
         is_xml_valid = False
     if is_xml_valid:
         if is_debug:
+            print(f"LLM返回结果：\n{llm_result}")
             print(f"表格内容：\n{table_context}")
             print(f"XML结构：\n{xml_result}")
+            print(f"start_row：\n{start_row}")
         table_objects = parse_table_to_objects(table, xml_result, start_row)
         if is_debug:
             print(f"对象列表：\n{table_objects}")
@@ -569,15 +578,17 @@ def get_all_files(directory):
 def test_single_file():
     parse_docx_tables(file_path)
 
-def test_batch_files():
+def test_batch_files(worker_num):
     all_files = get_all_files(r'C:\Lee\files\采购\others')
     all_files_dic_list = [{'file_path':file} for file in all_files]
     print(f"共{len(all_files)}个文件")
-    parallel(all_files_dic_list,parse_docx_tables,worker_num=4)
+    parallel(all_files_dic_list,parse_docx_tables,worker_num=worker_num)
+
 
 def main():
     start = time.time()
     test_single_file()
+    # test_batch_files(worker_num=10)
     end = time.time()
     print(f"解析完成，耗时：{end-start}秒")
 

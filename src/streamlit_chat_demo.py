@@ -49,6 +49,7 @@ system_prompt = '''
 `manufacturer`（字符串，制造商）。
 用户的需求是：查找与输入关键词相关的所有记录，关键词可能出现在上述任意字段中。
 如果是模糊匹配要求（大小写不敏感），覆盖所有可能的数据，查询结果包含所有字段。
+所有查询结果按'table_index'字段进行升序排列。
 注意不要虚构任何数据并按照用户的需求进行查询。
 构建的查询语句应该以`db.equipment_collection.find(${query_json})`为模板。
 只需要提供完整的MongoDB查询对象`query_json`，输出在<query></query>标签中，完整的<query></query>标签由<result></result>包裹，确保语法正确。
