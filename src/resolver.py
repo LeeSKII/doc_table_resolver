@@ -35,6 +35,7 @@ table_header_search_system_prompt = '''
 你是一位表格数据的识别判断专家，可以帮助分析提供的表格是否为设备\产品表格，用户提供表格内容位于<table></table>标签中，识别要求如下：
    1、首先判断是否为设备\产品表格：
       设备的表头一般出现在表格的前五行以内；
+      每一行数据位于`[]`中；
       常见的设备表格的表头字段通常包含但是不局限有：名称或者设备名称或产品，规格或者规格/材质或者型号，单位，数量，单价，总价，生产厂家等，
       如果主要字段基本符合设备表格的要求，名称或者设备名称是必需的，价格、单价、总价至少有一条是必需的，注意表头字段都是在同一行的。
       如果满足这些字段必须的条件，那么可以判断**是**设备表格,按以下分析策略:
@@ -587,8 +588,8 @@ def test_batch_files(worker_num):
 
 def main():
     start = time.time()
-    test_single_file()
-    # test_batch_files(worker_num=10)
+    # test_single_file()
+    test_batch_files(worker_num=10)
     end = time.time()
     print(f"解析完成，耗时：{end-start}秒")
 
