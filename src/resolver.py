@@ -7,21 +7,33 @@ import xml.etree.ElementTree as ET
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv
+import os
 
-file_path ="C:\\Lee\\files\\采购\\others\\04 管道增压泵采购合同.docx"
+from utils.llm import call_deepseek,call_ollama
+from utils.logger import log_to_mongodb
+
+
+
+load_dotenv()
+# 获取环境变量
+deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
+deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+
+file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\14自动汽水取样装置采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\05 起重设备采购合同.docx"
 file_path ="C:\\Lee\\files\\采购\\others\\12低压柜及三箱合同.docx"
 file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\04 渣浆泵备件采购合同.docx"
 file_path ="C:\\Lee\\files\\03 循环风机采购合同.docx"
-file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
-file_path ="C:\\Lee\\files\\采购\\others\\14自动汽水取样装置采购合同.docx"
-file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
+file_path ="C:\\Lee\\files\\采购\\others\\04 管道增压泵采购合同.docx"
 
 
 table_header_search_system_prompt = '''
 你是一位表格数据的识别判断专家，可以帮助分析提供的表格是否为设备\产品表格，用户提供表格内容位于<table></table>标签中，识别要求如下：
    1、首先判断是否为设备\产品表格：
-      设备的表头一般出现在表格的前三行以内；
+      设备的表头一般出现在表格的前五行以内；
       常见的设备表格的表头字段通常包含但是不局限有：名称或者设备名称或产品，规格或者规格/材质或者型号，单位，数量，单价，总价，生产厂家等，
       如果主要字段基本符合设备表格的要求，名称或者设备名称是必需的，价格、单价、总价至少有一条是必需的，注意表头字段都是在同一行的。
       如果满足这些字段必须的条件，那么可以判断**是**设备表格,按以下分析策略:
@@ -33,6 +45,7 @@ table_header_search_system_prompt = '''
         需要注意如果在分析价格字段的时候，将价格单位进行识别，常规是**元**或者**万元**（如果不属于二者其一，使用表格提供的原始单位数据），价格单位通常出现在价格字段之后，位于（）括号符号内；
       1.2.2、分别整理每个字段；
       1.2.3、最后检查索引和对应原始表格字段和标准化后字段的名称映射正确。
+        注意索引都是从0开始计数。
     1.3、 按照要求生成XML结构：
       1.3.1、检查是否所有标准字段都被覆盖：
         设备名称：有|无
@@ -43,15 +56,15 @@ table_header_search_system_prompt = '''
         单价：有|无
         总价：有|无       
         
-        最后生成如下格式的XML(start_row属性表示表头行索引，根据实际表头所在的行索引进行填写)，其中unit属性只有标准字段单价和总价才有：
+        最后生成如下格式的XML(start_row属性表示表头行索引，index属性表示原始表格字段索引，根据实际表头所在的行索引进行填写)，其中unit属性只有标准字段单价和总价才有：
         <fields start_row="0">
-            <field original="名称" standard="设备名称" index="1"/>
-            <field original="规格/材质" standard="规格/材质" index="2"/>
-            <field original="单位" standard="单位" index="3"/>
-            <field original="数量" standard="数量" index="4"/>
-            <field original="生产厂家" standard="生产厂家" index="5"/>
-            <field original="单价" standard="单价" unit="元" index="6"/>
-            <field original="总价" standard="总价" unit="元" index="7"/>
+            <field original="名称" standard="设备名称" index="0"/>
+            <field original="规格/材质" standard="规格/材质" index="1"/>
+            <field original="单位" standard="单位" index="2"/>
+            <field original="数量" standard="数量" index="3"/>
+            <field original="生产厂家" standard="生产厂家" index="4"/>
+            <field original="单价" standard="单价" unit="元" index="5"/>
+            <field original="总价" standard="总价" unit="元" index="6"/>
         </fields>
   
    2、如果用户提供的表格**不是**一份设备表格，请直接返回空xml，格式为<xml></xml>，不需要做任何的标准化字段提取。
@@ -80,30 +93,34 @@ key_mapping = {
 model_name = 'deepseek-r1:32b'
 
 
-config = {
+ollama_config = {
     'model_name': 'qwq:latest',
     'ollama_host':'http://192.168.43.41:11434',
 }
 
 def search_table_header_with_llm(table_content:str):
-    client = Client(
-        host='http://192.168.43.41:11434',
-        headers={'x-some-header': 'some-value'}
-    )
-    response = client.chat(model=model_name, 
-                        options={
-                            'temperature':0,
-                             "num_ctx": 4096,
-                        },
-                        messages=[
-    {
-        'role': 'user',
-        'content': f"{table_header_search_system_prompt}<table>{table_content}</table>"+"<think>\n",
-    },
-    ])
-    # print(response.message.content)
-
-    return response.message.content
+    
+    response = call_deepseek(base_url=deepseek_base_url,api_key=deepseek_api_key,
+                             prompt=f"<table>{table_content}</table>",system_prompt=table_header_search_system_prompt) 
+    return response
+    
+    # 原始调用
+    # client = Client(
+    #     host='http://192.168.43.41:11434',
+    #     headers={'x-some-header': 'some-value'}
+    # )
+    # response = client.chat(model=model_name, 
+    #                     options={
+    #                         'temperature':0,
+    #                          "num_ctx": 4096,
+    #                     },
+    #                     messages=[
+    # {
+    #     'role': 'user',
+    #     'content': f"{table_header_search_system_prompt}<table>{table_content}</table>"+"<think>\n",
+    # },
+    # ])
+    # return response.message.content
 
 def is_valid_data(data_list):
     """
@@ -232,8 +249,8 @@ def parse_table_to_objects(table, mapping_list:List, start_row=0):
     header_mapping = {item['original']: item['standard'] for item in mapping_list}
     index_mapping = {item['original']: int(item['index']) for item in mapping_list}
     
-    # 获取表头行（第一行）
-    header_row = table.rows[0].cells
+    # 获取表头行（第start_row行）
+    header_row = table.rows[int(start_row)].cells
     headers = [cell.text.strip() for cell in header_row]
     
     # 验证表头是否与 mapping_list 中的 original 匹配，并找出未定义的表头
@@ -246,11 +263,14 @@ def parse_table_to_objects(table, mapping_list:List, start_row=0):
     # 解析数据行
     result = []
     start_row = int(start_row) + 1
+    table_row_index = start_row  # 索引行
     for row in table.rows[start_row:]:  # 从start_row+1行开始
         cells = [cell.text.strip() for cell in row.cells]
             
         # 创建对象
-        obj = {}
+        obj = {'table_row_index':table_row_index}
+        table_row_index += 1
+        
         # 处理已定义的映射字段
         for original, standard in header_mapping.items():
             idx = index_mapping.get(original, -1)
@@ -303,23 +323,28 @@ def resolve_doc_info(file_path):
         </fields>
         注意不要虚构内容，仅根据用户提供的内容进行数据提取，如果没有找到相关的合同信息，对应的属性值可以为空。
     '''
-    client = Client(
-    host='http://192.168.43.41:11434',
-    headers={'x-some-header': 'some-value'}
-    )
-    response = client.chat(model='qwq:latest', 
-                        options={
-                            'temperature':0,
-                            "num_ctx": 1024*32,
-                        },
-                        messages=[
-        {'role':'system', 'content': system_prompt},
-        {
-            'role': 'user',
-            'content': f"{context}"+"<think>\n",
-        },
-    ])
-    return response.message.content
+    
+    response = call_deepseek(base_url=deepseek_base_url,api_key=deepseek_api_key,
+                             prompt=f"{context}",system_prompt=system_prompt) 
+    return response
+    
+    # client = Client(
+    # host='http://192.168.43.41:11434',
+    # headers={'x-some-header': 'some-value'}
+    # )
+    # response = client.chat(model='qwq:latest', 
+    #                     options={
+    #                         'temperature':0,
+    #                         "num_ctx": 1024*16,
+    #                     },
+    #                     messages=[
+    #     {'role':'system', 'content': system_prompt},
+    #     {
+    #         'role': 'user',
+    #         'content': f"{context}"+"<think>\n",
+    #     },
+    # ])
+    # return response.message.content
 
 # 函数：根据映射表转换字典键
 def transform_keys(data, mapping):
@@ -339,7 +364,7 @@ def save_to_mongodb(transformed_data):
         
         # 插入数据
         result = collection.insert_one(transformed_data)
-        print(f"数据插入成功，ID: {result.inserted_id}")
+        # print(f"数据插入成功，ID: {result.inserted_id}")
         
         # 关闭连接
         client.close()
@@ -347,8 +372,6 @@ def save_to_mongodb(transformed_data):
         print(f"发生错误: {str(e)}")
 
 def resolve_doc_meta_info_with_llm(file_path:str):
-     # 打开 .docx 文件
-    doc = Document(file_path)
     # 解析文档元数据
     doc_meta_text = resolve_doc_info(file_path)
     doc_meta_dic = parse_doc_meta_xml_to_dict(doc_meta_text)
@@ -359,12 +382,15 @@ def resolve_doc_meta_info_with_llm(file_path:str):
 def retrieve_table_from_docx(file_path:str):
     doc = Document(file_path)
     doc_meta_dic = resolve_doc_meta_info_with_llm(file_path)
+    if is_debug:
+        print(f"文档元数据\n{doc_meta_dic}")
     
     table_index = 0
     table_dic_list = []
      # 遍历文档中的所有表格
     for table in doc.tables:
-        print("找到一个表格：\n")
+        if is_debug:
+            print("找到一个表格：\n")
         table_index += 1
         table_context_list = []
         row_index = 0
@@ -388,7 +414,21 @@ def retrieve_table_from_docx(file_path:str):
     return table_dic_list
 
 
+def merge_db_with_info_to_mongodb(table_objects,doc_meta_dic,table_index):
+    '''保存表格数据到MongoDB'''
+    for obj in table_objects:
+        db_data_dic = transform_keys(obj, key_mapping)
+        # 新增数据写入时间
+        extend_info = {'created_time': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}
+        # 合并文档元数据
+        merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index} | extend_info
+        try:                
+            save_to_mongodb(merge_dic)
+        except Exception as e:
+            print(f"存储到MongoDB失败: {str(e)}")            
+
 def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
+    print(f"开始解析表格{table_index}...")
     llm_result = search_table_header_with_llm(table_context)
     xml_result,start_row = extract_xml_to_dict(llm_result)
     if xml_result is not None:
@@ -396,21 +436,15 @@ def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
     else:
         is_xml_valid = False
     if is_xml_valid:
-        # print(f"表格内容：\n{table_context}")
-        # print(f"XML结构：\n{xml_result}")
-
+        if is_debug:
+            print(f"表格内容：\n{table_context}")
+            print(f"XML结构：\n{xml_result}")
         table_objects = parse_table_to_objects(table, xml_result, start_row)
-        # print(f"对象列表：\n{table_objects}")
-        for obj in table_objects:
-            db_data_dic = transform_keys(obj, key_mapping)
-            # 合并文档元数据
-            merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
-            try:                
-                save_to_mongodb(merge_dic)
-            except Exception as e:
-                print(f"存储到MongoDB失败: {str(e)}")            
+        if is_debug:
+            print(f"对象列表：\n{table_objects}")
+        merge_db_with_info_to_mongodb(table_objects,doc_meta_dic,table_index)
     elif xml_result is not None and is_xml_valid is False:
-        print(xml_result)
+        # print(xml_result)
         # 需要进入重试机制，重新分析表格内容
         print("LLM解析非有效XML结构，重新分析！")
         # LLM重新数据分析
@@ -420,22 +454,17 @@ def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
             is_xml_valid = is_valid_data(xml_result)
         else:
             is_xml_valid = False
+            log_to_mongodb({'level':'info','message':f"解析表格{table_index}失败，文件路径：{doc_meta_dic['file_path']}"})
             print("LLM重新解析失败！")
         if is_xml_valid:
-
+            # 重新解析后成功了再保存
             table_objects = parse_table_to_objects(table, xml_result, start_row)
-            for obj in table_objects:
-                db_data_dic = transform_keys(obj, key_mapping)
-                # 合并文档元数据
-                merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
-                try:                
-                    save_to_mongodb(merge_dic)
-                except Exception as e:
-                    print(f"存储到MongoDB失败: {str(e)}")     
+            merge_db_with_info_to_mongodb(table_objects,doc_meta_dic,table_index)
     else:
-        print(f"表格内容：\n{table_context}")
-        print(f"llm_result:\n{llm_result}")
-        print("无XML结构!")
+        # print(f"表格内容：\n{table_context}")
+        # print(f"llm_result:\n{llm_result}")
+        # print("无XML结构!")
+        pass
 
 
 def parallel(arg_list,func,worker_num=4):
@@ -447,9 +476,10 @@ def parallel(arg_list,func,worker_num=4):
 
 
 def parse_docx_tables(file_path):
-    
+    print(f'开始处理文档：{file_path}')
     table_dic_list = retrieve_table_from_docx(file_path)
-    parallel(table_dic_list,retrieve_table_info_with_llm)
+
+    parallel(table_dic_list,retrieve_table_info_with_llm,worker_num=10)
     
     # 打开 .docx 文件
     # doc = Document(file_path)
@@ -528,9 +558,31 @@ def parse_docx_tables(file_path):
         
     # print("-" * 50)  # 分隔不同表格
 
+def get_all_files(directory):
+    '''递归获取所有文件（包括子文件夹）'''
+    all_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            all_files.append(os.path.join(root, file))
+    return all_files
 
-if __name__ == '__main__':
-    start = time.time()
+def test_single_file():
     parse_docx_tables(file_path)
+
+def test_batch_files():
+    all_files = get_all_files(r'C:\Lee\files\采购\others')
+    all_files_dic_list = [{'file_path':file} for file in all_files]
+    print(f"共{len(all_files)}个文件")
+    parallel(all_files_dic_list,parse_docx_tables,worker_num=4)
+
+def main():
+    start = time.time()
+    test_single_file()
     end = time.time()
     print(f"解析完成，耗时：{end-start}秒")
+
+
+if __name__ == '__main__':
+    is_debug = True
+    main()
+   
