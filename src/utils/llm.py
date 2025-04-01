@@ -23,18 +23,22 @@ def call_ollama(host:str, prompt:str, system_prompt:str,model:str,temperature=0,
     return response.message.content
 
 def call_deepseek(base_url:str, api_key:str, prompt:str, system_prompt:str, temperature=0):
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url)
 
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        temperature=temperature,       
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        stream=False
-    )
-    return response.choices[0].message.content
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            temperature=temperature,       
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            stream=False
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f'请求deepseek失败，原因：{e}')
+        return None
 
 if __name__ == '__main__':
     load_dotenv()

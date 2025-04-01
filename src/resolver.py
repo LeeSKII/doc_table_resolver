@@ -1,3 +1,6 @@
+from math import log
+from pickletools import read_unicodestring1
+from tracemalloc import start
 from typing import List
 from docx import Document
 from ollama import Client
@@ -9,6 +12,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 import os
+import shutil
+from tqdm import tqdm
 
 from utils.llm import call_deepseek,call_ollama
 from utils.logger import log_to_mongodb
@@ -153,6 +158,10 @@ def extract_xml_to_dict(text):
     返回:
         tuple: (字段字典列表, start_row值) 如果解析失败返回 (None, None)
     """
+    
+    if not text:
+        return None, None  # 如果文本为空，返回None, None
+    
     # 使用正则表达式提取<fields>...</fields>部分
     pattern = r'<fields.*?>.*?</fields>'
     matches = re.findall(pattern, text, re.DOTALL)
@@ -436,8 +445,13 @@ def merge_db_with_info_to_mongodb(table_objects,doc_meta_dic,table_index):
             print(f"存储到MongoDB失败: {str(e)}")            
 
 def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
-    print(f"开始解析表格{table_index}...")
+    if is_debug:
+        print(f"开始解析表格{table_index}...")
     llm_result = search_table_header_with_llm(table_context)
+    if llm_result is None:
+        print("LLM返回空结果，跳过！")
+        log_to_mongodb({'level':'error','message':f"LLM解析表格{table_index}失败，文件路径：{doc_meta_dic['file_path']}"})
+        return
     xml_result,start_row = extract_xml_to_dict(llm_result)
     if xml_result is not None:
         is_xml_valid = is_valid_data(xml_result)
@@ -474,99 +488,52 @@ def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
         # print(f"表格内容：\n{table_context}")
         # print(f"llm_result:\n{llm_result}")
         # print("无XML结构!")
-        pass
+        return
 
 
-def parallel(arg_list,func,worker_num=4):
-    '''并行处理任务'''
-    with ThreadPoolExecutor(max_workers=worker_num) as executor:
+def parallel(arg_list,func,max_workers=4,show_progress=False):
+    '''并行处理任务，等待返回结果'''
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         """Process multiple inputs concurrently with the same prompt."""
         futures = [executor.submit(func,**item) for item in arg_list]
-        return [f.result() for f in futures]
+        if show_progress:
+            # 使用 tqdm 包装 futures，实时显示进度
+            results = [f.result() for f in tqdm(futures, total=len(futures), desc="Processing")]
+        else:
+            results = [f.result() for f in futures]
+        return results
 
+#TODO: 需要优化子任务也是异步的通信机制
+def process_list_concurrently(items_list,process_func, max_workers=4):
+    '''并行处理任务，不需要要等待返回结果'''
+    start_time = time.time()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有任务，不等待结果
+        executor.map(process_func, items_list)
+    
+    end_time = time.time()
+    print(f"处理完成，耗时：{end_time-start_time}秒")
 
 def parse_docx_tables(file_path):
     print(f'开始处理文档：{file_path}')
+    if not custom_filter(file_path):
+        # print(f"文件{file_path}不符合过滤条件，跳过！")
+        log_to_mongodb({'level':'info','type':'file_filtered','message':f"文件{file_path}不符合过滤条件，跳过！"})
+        return f'{file_path}不符合过滤条件，跳过！'
     table_dic_list = retrieve_table_from_docx(file_path)
-
-    parallel(table_dic_list,retrieve_table_info_with_llm,worker_num=10)
+    parallel(table_dic_list,retrieve_table_info_with_llm,max_workers=10)
     
-    # 打开 .docx 文件
-    # doc = Document(file_path)
-    # # 解析文档元数据
-    # doc_meta_dic = resolve_doc_meta_info_with_llm(file_path)
-    # print(f"文档元数据\n{doc_meta_dic}")
-    
-    # 遍历文档中的所有表格
-    # table_index = 0
-    # for table in doc.tables:
-    #     print("找到一个表格：\n")
-    #     table_context_list = []
-    #     row_index = 0
-    #     # 遍历表格的每一行
-    #     for row in table.rows:
-    #         row_data = []
-    #         # 遍历每一行的每个单元格
-    #         for cell in row.cells:
-    #             row_data.append(cell.text.strip())  # 获取单元格文本并去除多余空格
-    #         # print(row_data)  # 打印该行内容
-    #         table_context_list.append(row_data)  # 将该行内容添加到表格内容列表中
-    #         row_index += 1
-    #         # 限制表格解析行数，防止上下文溢出
-    #         if row_index > 5:
-    #             break
-    #     table_context = '\n'.join('\t'.join(row) for row in table_context_list)
-    #     table_objects = None
-    #     # LLM继续数据分析
-    #     llm_result = search_table_header_with_llm(table_context)
-    #     xml_result,start_row = extract_xml_to_dict(llm_result)
-    #     if xml_result is not None:
-    #         is_xml_valid = is_valid_data(xml_result)
-    #     else:
-    #         is_xml_valid = False
-    #     if is_xml_valid:
-    #         # print(f"表格内容：\n{table_context}")
-    #         # print(f"XML结构：\n{xml_result}")
-    #         table_index += 1
-    #         table_objects = parse_table_to_objects(table, xml_result, start_row)
-    #         # print(f"对象列表：\n{table_objects}")
-    #         for obj in table_objects:
-    #             db_data_dic = transform_keys(obj, key_mapping)
-    #             # 合并文档元数据
-    #             merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
-    #             try:                
-    #                 save_to_mongodb(merge_dic)
-    #             except Exception as e:
-    #                 print(f"存储到MongoDB失败: {str(e)}")            
-    #     elif xml_result is not None and is_xml_valid is False:
-    #         print(xml_result)
-    #         # 需要进入重试机制，重新分析表格内容
-    #         print("LLM解析非有效XML结构，重新分析！")
-    #         # LLM重新数据分析
-    #         llm_result = search_table_header_with_llm(table_context)
-    #         xml_result,start_row = extract_xml_to_dict(llm_result)
-    #         if xml_result is not None:
-    #             is_xml_valid = is_valid_data(xml_result)
-    #         else:
-    #             is_xml_valid = False
-    #             print("LLM重新解析失败！")
-    #         if is_xml_valid:
-    #             table_index += 1
-    #             table_objects = parse_table_to_objects(table, xml_result, start_row)
-    #             for obj in table_objects:
-    #                 db_data_dic = transform_keys(obj, key_mapping)
-    #                 # 合并文档元数据
-    #                 merge_dic = db_data_dic | doc_meta_dic | {'table_index': table_index}
-    #                 try:                
-    #                     save_to_mongodb(merge_dic)
-    #                 except Exception as e:
-    #                     print(f"存储到MongoDB失败: {str(e)}")     
-    #     else:
-    #         print(f"表格内容：\n{table_context}")
-    #         print(f"llm_result:\n{llm_result}")
-    #         print("无XML结构!")
-        
-    # print("-" * 50)  # 分隔不同表格
+    try:
+        #处理完这个文件后添加到已处理文件中，并记录日志
+        destination_path = r'C:\Lee\files\采购\processed'
+        # 移动文件
+        shutil.move(file_path, destination_path)
+        log_to_mongodb({'level':'info','type':'file_resolved','message':f"文件解析处理完成，文件路径：{file_path}"})
+        return f'文件{file_path}解析处理完成！'
+    except Exception as e:
+        # print(f"文件处理失败：{str(e)}")
+        log_to_mongodb({'level':'error','type':'file_resolved','message':f"文件{file_path}处理失败，原因：{str(e)}"})
+        return f'文件{file_path}处理完成！但是移动失败！'
 
 def get_all_files(directory):
     '''递归获取所有文件（包括子文件夹）'''
@@ -576,25 +543,33 @@ def get_all_files(directory):
             all_files.append(os.path.join(root, file))
     return all_files
 
+def custom_filter(file_path:str):
+    '''自定义文件过滤器'''
+    if "技术协议" in file_path:
+        return False   
+    if file_path.endswith('.docx'):
+        return True
+    return False
+
 def test_single_file():
     parse_docx_tables(file_path)
 
 def test_batch_files(worker_num):
-    all_files = get_all_files(r'C:\Lee\files\采购\others')
+    all_files = get_all_files(r'C:\Lee\files\采购\trans')
     all_files_dic_list = [{'file_path':file} for file in all_files]
     print(f"共{len(all_files)}个文件")
-    parallel(all_files_dic_list,parse_docx_tables,worker_num=worker_num)
+    parallel(all_files_dic_list,parse_docx_tables,max_workers=worker_num,show_progress=True)
 
 
 def main():
-    start = time.time()
+    start_time = time.time()
     # test_single_file()
     test_batch_files(worker_num=10)
-    end = time.time()
-    print(f"解析完成，耗时：{end-start}秒")
+    end_time = time.time()
+    print(f"总耗时：{end_time-start_time}秒")
 
 
 if __name__ == '__main__':
-    is_debug = True
+    is_debug = False
     main()
    
