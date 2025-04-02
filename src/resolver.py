@@ -24,6 +24,8 @@ load_dotenv()
 # 获取环境变量
 deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
 deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+# deepseek_base_url = os.getenv("OPENROUTER_BASE_URL")
+# deepseek_api_key = os.getenv("OPENROUTER_API_KEY")
 
 file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
 
@@ -80,6 +82,9 @@ table_header_search_system_prompt = '''
    **注意：请严格遵守以上约定，先识别是否是设备表格，再根据对应的结果进行输出,最终的显示结果仅包含XML。**
    
    在回答中请不要假设任何不属于用户提供的数据，并且不要虚拟数据，如实的根据用户提供的数据回答。
+   请step by step的分析用户提供的文本，将分析内容写在<think></think>标签中，\
+   最后再检查<think></think>标签中的field的字段的名称对应是否正确，是否与标准化字段的名称匹配，然后再次检查索引是否按照原表的顺序从0开始，并根据原表表头据实取索引值。
+   再将分析结果输出到独立的<fields></fields>标签中。
    
    以下是用户提供的表格数据：
 '''
@@ -97,10 +102,6 @@ key_mapping = {
     'other_column': 'additional_info',
 }
 
-
-model_name = 'deepseek-r1:32b'
-
-
 ollama_config = {
     'model_name': 'qwq:latest',
     'ollama_host':'http://192.168.43.41:11434',
@@ -109,7 +110,7 @@ ollama_config = {
 def search_table_header_with_llm(table_content:str):
     
     response = call_deepseek(base_url=deepseek_base_url,api_key=deepseek_api_key,
-                             prompt=f"<table>{table_content}</table>",system_prompt=table_header_search_system_prompt) 
+                             prompt=f"<table>{table_content}</table>",system_prompt=table_header_search_system_prompt,model_name=model_name) 
     return response
     
     # 原始调用
@@ -334,10 +335,11 @@ def resolve_doc_info(file_path):
             <field 子项名称="例如：配件|设备|服务 等" />
         </fields>
         注意不要虚构内容，仅根据用户提供的内容进行数据提取，如果没有找到相关的合同信息，对应的属性值可以为空。
+        请step by step的分析用户提供的文本，将分析内容写在<think></think>标签中，再将分析结果输出到独立的<fields></fields>标签中。
     '''
     
     response = call_deepseek(base_url=deepseek_base_url,api_key=deepseek_api_key,
-                             prompt=f"{context}",system_prompt=system_prompt) 
+                             prompt=f"{context}",system_prompt=system_prompt,model_name=model_name) 
     return response
     
     # client = Client(
@@ -525,7 +527,7 @@ def parse_docx_tables(file_path):
     
     try:
         #处理完这个文件后添加到已处理文件中，并记录日志
-        destination_path = r'C:\Lee\files\采购\processed'
+        destination_path = r'C:\Lee\work\contract\all\processed'
         # 移动文件
         shutil.move(file_path, destination_path)
         log_to_mongodb({'level':'info','type':'file_resolved','message':f"文件解析处理完成，文件路径：{file_path}"})
@@ -555,7 +557,7 @@ def test_single_file():
     parse_docx_tables(file_path)
 
 def test_batch_files(worker_num):
-    all_files = get_all_files(r'C:\Lee\files\采购\trans')
+    all_files = get_all_files(r'C:\Lee\work\contract\all\trans')
     all_files_dic_list = [{'file_path':file} for file in all_files]
     print(f"共{len(all_files)}个文件")
     parallel(all_files_dic_list,parse_docx_tables,max_workers=worker_num,show_progress=True)
@@ -564,12 +566,14 @@ def test_batch_files(worker_num):
 def main():
     start_time = time.time()
     # test_single_file()
-    test_batch_files(worker_num=10)
+    test_batch_files(worker_num=20)
     end_time = time.time()
     print(f"总耗时：{end_time-start_time}秒")
 
 
 if __name__ == '__main__':
-    is_debug = False
+    is_debug = True
+    # model_name='deepseek/deepseek-chat-v3-0324:free'
+    model_name='deepseek-chat'
     main()
    
