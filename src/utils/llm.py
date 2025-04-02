@@ -22,12 +22,12 @@ def call_ollama(host:str, prompt:str, system_prompt:str,model:str,temperature=0,
     ])
     return response.message.content
 
-def call_deepseek(base_url:str, api_key:str, prompt:str, system_prompt:str, temperature=0):
+def call_deepseek(base_url:str, api_key:str, prompt:str, system_prompt:str, model_name="deepseek-chat",temperature=0):
     try:
         client = OpenAI(api_key=api_key, base_url=base_url)
 
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model=model_name,
             temperature=temperature,       
             messages=[
                 {"role": "system", "content": system_prompt},
