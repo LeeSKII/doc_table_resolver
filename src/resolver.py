@@ -17,15 +17,6 @@ from tqdm import tqdm
 from utils.llm import call_deepseek,call_ollama
 from utils.logger import log_to_mongodb
 
-
-
-load_dotenv()
-# 获取环境变量
-deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
-deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-# deepseek_base_url = os.getenv("OPENROUTER_BASE_URL")
-# deepseek_api_key = os.getenv("OPENROUTER_API_KEY")
-
 file_path ="C:\\Lee\\files\\采购\\安阳钢铁集团有限责任公司综利公司烧结机头灰资源化处置项目（运营）\\05 压滤机滤布采购合同.docx"
 
 file_path ="C:\\Lee\\files\\采购\\others\\03 回转窑采购合同.docx"
@@ -584,11 +575,20 @@ def main():
 
 
 if __name__ == '__main__':
+    
+    load_dotenv()
+    # 获取环境变量
+    deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+    # deepseek_base_url = os.getenv("OPENROUTER_BASE_URL")
+    # deepseek_api_key = os.getenv("OPENROUTER_API_KEY")
+
+       
     is_debug = False
-    model_name='deepseek/deepseek-chat-v3-0324:free'
-    # model_name='deepseek-chat'
+    # model_name='deepseek/deepseek-chat-v3-0324:free'
+    model_name='deepseek-chat'
     # model_name='deepseek-reasoner'
-    source_path = r'C:\Lee\work\contract\all\trans1'
+    source_path = r'C:\Lee\work\contract\all\trans0'
     destination_path = r'C:\Lee\work\contract\all\processed'
     # source_path = r'C:\Lee\files\采购\others'
     # destination_path = r'C:\Lee\files\采购\processed'
