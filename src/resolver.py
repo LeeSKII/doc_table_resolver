@@ -1,4 +1,3 @@
-from math import log
 from pickletools import read_unicodestring1
 from tracemalloc import start
 from typing import List
@@ -39,24 +38,31 @@ file_path ="C:\\Lee\\files\\采购\\others\\14自动汽水取样装置采购合�
 
 
 table_header_search_system_prompt = '''
-你是一位表格数据的识别判断专家，可以帮助分析提供的表格是否为设备\产品表格，用户提供表格内容位于<table></table>标签中，识别要求如下：
-   1、首先判断是否为设备\产品表格：
+你是一位表格数据的识别判断专家，可以帮助分析提供的表格是否为**设备\产品**表格，用户提供表格内容位于<table></table>标签中，识别要求如下：
+   1、首先判断是否为**设备\产品**表格：
       设备的表头一般出现在表格的前五行以内；
       每一行数据位于`[]`中；
       常见的设备表格的表头字段通常包含但是不局限有：名称或者设备名称或产品，规格或者规格/材质或者型号，单位，数量，单价，总价，生产厂家等，
       如果主要字段基本符合设备表格的要求，名称或者设备名称是必需的，价格、单价、总价至少有一条是必需的，注意表头字段都是在同一行的。
       如果满足这些字段必须的条件，那么可以判断**是**设备表格,按以下分析策略:
     1.1、需要逐个分析原始表头字段，标准化表头到指定的字段：设备名称、规格/材质、单位、数量、生产厂家、单价、总价；
-      （分析的时候注意：一、没有出现价格字段，那么默认单价就是价格；二、标准化字段没有出现在原始表格中，将其结果设置为“ ”空然后原始表格对应提取字段索引设置为-1。)
-    1.2、分析设备表格表头字段：   
+      （分析的时候注意：一、没有出现价格字段，那么默认单价就是价格；二、标准化字段没有出现在原始表格中，将其结果设置为“ ”空然后原始表格对应提取字段列索引设置为-1。)
+    1.2、分析设备表格表头字段生成<head></head>标签：
       分析的时候请遵循以下步骤：
       1.2.1、逐个分析表头字段：
         需要注意如果在分析价格字段的时候，将价格单位进行识别，常规是**元**或者**万元**（如果不属于二者其一，使用表格提供的原始单位数据），价格单位通常出现在价格字段之后，位于（）括号符号内；
-      1.2.2、分别整理每个字段；
-      1.2.3、最后检查索引和对应原始表格字段和标准化后字段的名称映射正确。
-        表头在表格的第几行，用start_row属性表示，注意start_row从0开始计数，0表示第一行，1表示第二行，以此类推。
-        注意索引都是从0开始计数。
-    1.3、 按照要求生成XML结构：
+      1.2.2、分别整理每个字段生成<head></head>标签；
+        表头在表格的行数，用start_row属性表示，注意start_row从0开始计数，0表示第一行，1表示第二行，以此类推。
+    将表头的原始字段和索引输出成如下格式生成在<head></head>标签中：
+    举例：
+    <head>
+    [{"字段":"序号";"索引":"0"},{"字段":"名称";"索引":"1"},{"字段":"规格/材质";"索引":"2"},{"字段":"单位";"索引":"3"},{"字段":"数量";"索引":"4"},{"字段":"生产厂家";"索引":"5"},{"字段":"单价";"索引":"6"},{"字段":"总价";"索引":"7"}]
+    </head>
+    或者
+    <head>
+    [{"字段":"名称";"索引":"0"},{"字段":"规格/材质";"索引":"1"},{"字段":"单位";"索引":"2"},{"字段":"数量";"索引":"3"},{"字段":"生产厂家";"索引":"4"},{"字段":"单价";"索引":"5"},{"字段":"总价";"索引":"6"},{"字段":"价格单位";"索引":"-1"}]
+    </head>
+    1.3、 按照<head></head>标签生成XML结构:
       1.3.1、检查是否所有标准字段都被覆盖：
         设备名称：有|无
         规格/材质：有|无
@@ -66,7 +72,7 @@ table_header_search_system_prompt = '''
         单价：有|无
         总价：有|无       
         
-        最后生成如下格式的XML(start_row属性表示表头行索引，index属性表示原始表格字段索引，根据实际表头所在的start_row进行填写)，其中unit属性只有标准字段单价和总价才有：
+        最后根据<head></head>标签的内容生成如下格式的XML(start_row属性表示表头的行位置，index属性表示原始表格列索引字段，0表示表头的第一个字段，1表示第二个字段，以此类推)，其中unit属性只有标准字段单价和总价才有:
         <fields start_row="0">
             <field original="名称" standard="设备名称" index="0"/>
             <field original="规格/材质" standard="规格/材质" index="1"/>
@@ -83,7 +89,8 @@ table_header_search_system_prompt = '''
    
    在回答中请不要假设任何不属于用户提供的数据，并且不要虚拟数据，如实的根据用户提供的数据回答。
    请step by step的分析用户提供的文本，将分析内容写在<think></think>标签中，\
-   最后再检查<think></think>标签中的field的字段的名称对应是否正确，是否与标准化字段的名称匹配，然后再次检查索引是否按照原表的顺序从0开始，并根据原表表头据实取索引值。
+   再将表头的整理写在<head></head>标签中，\
+   最后再综合<think></think>和<head></head>标签中的field的字段的名称对应是否正确，是否与标准化字段的名称匹配，再次检查索引是否是否匹配表头字段。
    再将分析结果输出到独立的<fields></fields>标签中。
    
    以下是用户提供的表格数据：
@@ -258,6 +265,7 @@ def parse_table_to_objects(table, mapping_list:List, start_row=0):
     返回:
         list: 解析后的对象列表，每个对象是一个字典
     """
+   
     # 创建从原始标题到标准字段的映射
     header_mapping = {item['original']: item['standard'] for item in mapping_list}
     index_mapping = {item['original']: int(item['index']) for item in mapping_list}
@@ -418,7 +426,7 @@ def retrieve_table_from_docx(file_path:str):
             table_context_list.append(row_data)  # 将该行内容添加到表格内容列表中
             row_index += 1
             # 限制表格解析行数，防止上下文溢出
-            if row_index > 6:
+            if row_index > 4:
                 break
         temp_list = []
         for row_data in table_context_list:
@@ -455,6 +463,9 @@ def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
         log_to_mongodb({'level':'error','message':f"LLM解析表格{table_index}失败，文件路径：{doc_meta_dic['file_path']}"})
         return
     xml_result,start_row = extract_xml_to_dict(llm_result)
+    if start_row is None:
+        log_to_mongodb({'level':'error','message':f"XML中{start_row}不存在，解析失败，文件路径：{doc_meta_dic['file_path']}"})
+        return
     if xml_result is not None:
         is_xml_valid = is_valid_data(xml_result)
     else:
@@ -462,12 +473,13 @@ def retrieve_table_info_with_llm(table_index,table,table_context,doc_meta_dic):
     if is_xml_valid:
         if is_debug:
             print(f"LLM返回结果：\n{llm_result}")
-            print(f"表格内容：\n{table_context}")
+            #print(f"表格内容：\n{table_context}")
             print(f"XML结构：\n{xml_result}")
-            print(f"start_row：\n{start_row}")
+            #print(f"start_row：\n{start_row}")
         table_objects = parse_table_to_objects(table, xml_result, start_row)
         if is_debug:
-            print(f"对象列表：\n{table_objects}")
+            pass
+            #print(f"对象列表：\n{table_objects}")
         merge_db_with_info_to_mongodb(table_objects,doc_meta_dic,table_index)
     elif xml_result is not None and is_xml_valid is False:
         # print(xml_result)
@@ -527,7 +539,7 @@ def parse_docx_tables(file_path):
     
     try:
         #处理完这个文件后添加到已处理文件中，并记录日志
-        destination_path = r'C:\Lee\work\contract\all\processed'
+        # destination_path = destination_path
         # 移动文件
         shutil.move(file_path, destination_path)
         log_to_mongodb({'level':'info','type':'file_resolved','message':f"文件解析处理完成，文件路径：{file_path}"})
@@ -548,7 +560,7 @@ def get_all_files(directory):
 def custom_filter(file_path:str):
     '''自定义文件过滤器'''
     if "技术协议" in file_path:
-        return False   
+        return False    
     if file_path.endswith('.docx'):
         return True
     return False
@@ -557,7 +569,7 @@ def test_single_file():
     parse_docx_tables(file_path)
 
 def test_batch_files(worker_num):
-    all_files = get_all_files(r'C:\Lee\work\contract\all\trans')
+    all_files = get_all_files(source_path)
     all_files_dic_list = [{'file_path':file} for file in all_files]
     print(f"共{len(all_files)}个文件")
     parallel(all_files_dic_list,parse_docx_tables,max_workers=worker_num,show_progress=True)
@@ -566,14 +578,19 @@ def test_batch_files(worker_num):
 def main():
     start_time = time.time()
     # test_single_file()
-    test_batch_files(worker_num=20)
+    test_batch_files(worker_num=10)
     end_time = time.time()
     print(f"总耗时：{end_time-start_time}秒")
 
 
 if __name__ == '__main__':
-    is_debug = True
-    # model_name='deepseek/deepseek-chat-v3-0324:free'
-    model_name='deepseek-chat'
+    is_debug = False
+    model_name='deepseek/deepseek-chat-v3-0324:free'
+    # model_name='deepseek-chat'
+    # model_name='deepseek-reasoner'
+    source_path = r'C:\Lee\work\contract\all\trans1'
+    destination_path = r'C:\Lee\work\contract\all\processed'
+    # source_path = r'C:\Lee\files\采购\others'
+    # destination_path = r'C:\Lee\files\采购\processed'
     main()
    
