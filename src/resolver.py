@@ -361,9 +361,31 @@ def resolve_doc_info(file_path):
 
 # 函数：根据映射表转换字典键
 def transform_keys(data, mapping):
-    if isinstance(data, dict):
-        return {mapping.get(k, k): transform_keys(v, mapping) for k, v in data.items()}
-    return data
+    if not isinstance(data, dict):
+        return data
+    
+    transformed = {}
+    other_data = {}
+    other_column_key = mapping.get('other_column', 'other_column')  # 获取 'other_column' 对应的新键名
+    
+    for k, v in data.items():
+        if k in mapping:  # 如果键在映射表中，使用新键名
+            new_key = mapping[k]
+            transformed[new_key] = transform_keys(v, mapping)
+        else:  # 否则，存入 other_data 待处理
+            other_data[k] = transform_keys(v, mapping)
+    
+    # 如果有未映射的键，将它们存入 other_column 对应的键下
+    if other_data:
+        if other_column_key in transformed:  # 如果 other_column 已存在，合并数据
+            if isinstance(transformed[other_column_key], dict):
+                transformed[other_column_key].update(other_data)
+            else:  # 如果不是字典（比如是字符串或 None），则覆盖
+                transformed[other_column_key] = other_data
+        else:  # 如果 other_column 不存在，直接赋值
+            transformed[other_column_key] = other_data
+    
+    return transformed
 
 # 连接到MongoDB
 def save_to_mongodb(transformed_data):
@@ -393,7 +415,11 @@ def resolve_doc_meta_info_with_llm(file_path:str):
     return doc_meta_dic
 
 def retrieve_table_from_docx(file_path:str):
-    doc = Document(file_path)
+    try:
+        doc = Document(file_path)
+    except Exception as e:
+        print(f"打开文件失败: {str(e)}")
+        return None
     doc_meta_dic = resolve_doc_meta_info_with_llm(file_path)
     if is_debug:
         print(f"文档元数据\n{doc_meta_dic}")
