@@ -256,59 +256,63 @@ def parse_table_to_objects(table, mapping_list:List, start_row=0):
     返回:
         list: 解析后的对象列表，每个对象是一个字典
     """
-   
-    # 创建从原始标题到标准字段的映射
-    header_mapping = {item['original']: item['standard'] for item in mapping_list}
-    index_mapping = {item['original']: int(item['index']) for item in mapping_list}
-    
-    # 获取表头行（第start_row行）
-    header_row = table.rows[int(start_row)].cells
-    headers = [cell.text.strip() for cell in header_row]
-    
-    # 验证表头是否与 mapping_list 中的 original 匹配，并找出未定义的表头
-    undefined_headers = {}
-    for idx, header in enumerate(headers):
-        if header not in header_mapping and header != '':
-            # print(f"警告: 表头 '{header}' 未在映射列表中定义，将被聚合到 other_column")
-            undefined_headers[header] = idx
-    
-    # 解析数据行
-    result = []
-    start_row = int(start_row) + 1
-    table_row_index = start_row  # 索引行
-    for row in table.rows[start_row:]:  # 从start_row+1行开始
-        cells = [cell.text.strip() for cell in row.cells]
-            
-        # 创建对象
-        obj = {'table_row_index':table_row_index}
-        table_row_index += 1
+    try:
+        # 创建从原始标题到标准字段的映射
+        header_mapping = {item['original']: item['standard'] for item in mapping_list}
+        index_mapping = {item['original']: int(item['index']) for item in mapping_list}
         
-        # 处理已定义的映射字段
-        for original, standard in header_mapping.items():
-            idx = index_mapping.get(original, -1)
-            if idx >= 0 and idx < len(cells):  # 确保索引有效
-                obj[standard] = cells[idx]
+        # 获取表头行（第start_row行）
+        header_row = table.rows[int(start_row)].cells
+        headers = [cell.text.strip() for cell in header_row]
         
-        # 价格单位字段直接添加
-        price_dic_list =  list(filter(lambda x: x['standard']=='单价', mapping_list))
-        if len(price_dic_list) > 0:
-            obj['价格单位'] = price_dic_list[0]['unit']
-        else:
-            obj['价格单位'] = ''
+        # 验证表头是否与 mapping_list 中的 original 匹配，并找出未定义的表头
+        undefined_headers = {}
+        for idx, header in enumerate(headers):
+            if header not in header_mapping and header != '':
+                # print(f"警告: 表头 '{header}' 未在映射列表中定义，将被聚合到 other_column")
+                undefined_headers[header] = idx
         
-        # 处理未定义的字段，聚合到 other_column
-        if undefined_headers:
-            other_column = {}
-            for header, idx in undefined_headers.items():
-                if idx < len(cells):  # 确保索引有效
-                    other_column[header] = cells[idx]
-            if other_column:  # 只有当有内容时才添加 other_column
-                obj['other_column'] = other_column
+        # 解析数据行
+        result = []
+        start_row = int(start_row) + 1
+        table_row_index = start_row  # 索引行
+        for row in table.rows[start_row:]:  # 从start_row+1行开始
+            cells = [cell.text.strip() for cell in row.cells]
                 
+            # 创建对象
+            obj = {'table_row_index':table_row_index}
+            table_row_index += 1
+            
+            # 处理已定义的映射字段
+            for original, standard in header_mapping.items():
+                idx = index_mapping.get(original, -1)
+                if idx >= 0 and idx < len(cells):  # 确保索引有效
+                    obj[standard] = cells[idx]
+            
+            # 价格单位字段直接添加
+            price_dic_list =  list(filter(lambda x: x['standard']=='单价', mapping_list))
+            if len(price_dic_list) > 0:
+                obj['价格单位'] = price_dic_list[0]['unit']
+            else:
+                obj['价格单位'] = ''
+            
+            # 处理未定义的字段，聚合到 other_column
+            if undefined_headers:
+                other_column = {}
+                for header, idx in undefined_headers.items():
+                    if idx < len(cells):  # 确保索引有效
+                        other_column[header] = cells[idx]
+                if other_column:  # 只有当有内容时才添加 other_column
+                    obj['other_column'] = other_column
+                    
+            
+            result.append(obj)
         
-        result.append(obj)
+        return result
     
-    return result
+    except Exception as e:
+        print(f"解析表格数据失败: {str(e)}")
+        return []
 
 # 解析文档元数据
 def resolve_doc_info(file_path):
@@ -614,7 +618,7 @@ if __name__ == '__main__':
     # model_name='deepseek/deepseek-chat-v3-0324:free'
     model_name='deepseek-chat'
     # model_name='deepseek-reasoner'
-    source_path = r'C:\Lee\work\contract\all\trans0'
+    source_path = r'C:\Lee\work\contract\all\trans'
     destination_path = r'C:\Lee\work\contract\all\processed'
     # source_path = r'C:\Lee\files\采购\others'
     # destination_path = r'C:\Lee\files\采购\processed'

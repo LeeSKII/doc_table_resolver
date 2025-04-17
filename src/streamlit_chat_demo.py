@@ -6,6 +6,14 @@ from datetime import datetime
 from ollama import Client
 import re
 import json
+from utils.llm import call_deepseek
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+# 获取环境变量
+deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL")
+deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
 
 def extract_last_result_query(text):
     """
@@ -94,7 +102,7 @@ def get_mongo_client(uri):
         st.stop()
 
 # 处理自然语言查询
-def generate_query(nl_query:str):
+def generate_query_ollama(nl_query:str):
     try:
         client = Client(
           host='http://192.168.43.41:11434',
@@ -113,6 +121,18 @@ def generate_query(nl_query:str):
           },
         ])
         result = response.message.content
+        print("LLM响应信息:\n",result)
+        result = extract_last_result_query(result)
+        print("提取出的查询信息:\n",result)
+        return json.loads(result)
+    except Exception as e:
+        if debug_mode:
+            st.error(f"生成查询失败: {str(e)}")
+        return None
+
+def generate_query(nl_query:str):
+    try:
+        result = call_deepseek(deepseek_base_url, deepseek_api_key, f"<input>{nl_query}</input>",system_prompt)     
         print("LLM响应信息:\n",result)
         result = extract_last_result_query(result)
         print("提取出的查询信息:\n",result)
