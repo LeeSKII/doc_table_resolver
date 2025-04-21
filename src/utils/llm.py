@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 from openai import OpenAI
 from time import time
+from typing import Generator
 
 def call_ollama(host:str, prompt:str, system_prompt:str,model:str,temperature=0,num_ctx=4096):
     client = Client(
@@ -22,7 +23,7 @@ def call_ollama(host:str, prompt:str, system_prompt:str,model:str,temperature=0,
     ])
     return response.message.content
 
-def call_deepseek(base_url:str, api_key:str, prompt:str, system_prompt:str, model_name="deepseek-chat",temperature=0):
+def call_deepseek(base_url: str, api_key: str, prompt: str, system_prompt: str, model_name: str = "deepseek-chat", temperature: float = 0, stream: bool = False) -> str | Generator[str, None, None]:
     try:
         client = OpenAI(api_key=api_key, base_url=base_url)
 
@@ -33,13 +34,20 @@ def call_deepseek(base_url:str, api_key:str, prompt:str, system_prompt:str, mode
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            stream=False
+            stream=stream
         )
-        return response.choices[0].message.content
+
+        if stream:
+            for chunk in response:
+                if chunk.choices[0].delta.content is not None:
+                    yield chunk.choices[0].delta.content
+        else:
+            return response.choices[0].message.content
+
     except Exception as e:
         print(f'请求deepseek失败，原因：{e}')
         return None
-
+    
 if __name__ == '__main__':
     load_dotenv()
     # 获取环境变量
