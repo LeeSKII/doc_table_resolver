@@ -206,7 +206,7 @@ def execute_mongo_query(filter_query, limit=300):
             'unit': '单位',
             'project_name': '项目名称',
             'contact_name': '合同名称',
-            'subiten_name': '子项名称',
+            'subitem_name': '子项名称',
             'contract_number': '合同号',
             'contact_type': '合同类型',
             'manufacturer': '制造商',
