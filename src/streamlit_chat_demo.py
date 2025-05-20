@@ -6,7 +6,7 @@ from datetime import datetime
 from ollama import Client
 import re
 import json
-from utils.llm import call_deepseek
+from utils.llm import call_deepseek_stream
 from dotenv import load_dotenv
 import os
 
@@ -148,12 +148,11 @@ def generate_query_streaming(nl_query: str, message_placeholder):
     full_response = ""
     
     # 调用LLM的流式接口
-    stream = call_deepseek(
+    stream = call_deepseek_stream(
         deepseek_base_url, 
         deepseek_api_key, 
         f"<input>{nl_query}</input>",
         system_prompt,
-        stream=True
     )
     
     # 实时显示响应

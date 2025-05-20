@@ -614,11 +614,11 @@ if __name__ == '__main__':
     # deepseek_api_key = os.getenv("OPENROUTER_API_KEY")
 
        
-    is_debug = False
+    is_debug = True
     # model_name='deepseek/deepseek-chat-v3-0324:free'
     model_name='deepseek-chat'
     # model_name='deepseek-reasoner'
-    source_path = r'C:\Lee\work\contract\all\trans'
+    source_path = r'C:\Lee\work\contract\all\trans0'
     destination_path = r'C:\Lee\work\contract\all\processed'
     # source_path = r'C:\Lee\files\采购\others'
     # destination_path = r'C:\Lee\files\采购\processed'
